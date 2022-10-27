@@ -186,7 +186,18 @@ class Snapshot(DatabaseTracker):
             condition=condition,
         )
 
-        pgtrigger.register(insert_trigger, update_trigger)(event_model.pgh_tracked_model)
+        delete_trigger = trigger.Event(
+            event_model=event_model,
+            label=self.label,
+            name=_get_name_from_label(f"{self.label}_delete"),
+            snapshot="OLD",
+            when=pgtrigger.After,
+            operation=pgtrigger.Delete,
+        )
+
+        pgtrigger.register(insert_trigger, update_trigger, delete_trigger)(
+            event_model.pgh_tracked_model
+        )
 
 
 class PreconfiguredDatabaseTracker(DatabaseTracker):
