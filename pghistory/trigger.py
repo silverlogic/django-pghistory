@@ -1,5 +1,6 @@
 from django.db import models
 import pgtrigger
+import uuid
 
 from pghistory import utils
 
@@ -44,6 +45,10 @@ class Event(pgtrigger.Trigger):
         if not self.snapshot:  # pragma: no cover
             raise ValueError('Must provide "snapshot"')
 
+
+        self.declare = self.declare or []
+        self.declare.append(("new_event_id", "integer"))
+
         super().__init__(name=name, operation=operation, condition=condition, when=when)
 
     def get_func(self, model):
@@ -58,6 +63,9 @@ class Event(pgtrigger.Trigger):
         fields["pgh_operation"] = str(getattr(utils.Operation, str(self.operation)).value)
         fields["pgh_created_at"] = "NOW()"
         fields["pgh_label"] = f"'{self.label}'"
+
+        if hasattr(self.event_model.pgh_tracked_model, "pgh_last_event"):
+            fields["pgh_previous_id"] = f'coalesce(NEW."{self.event_model.pgh_tracked_model.pgh_last_event.field.column}", OLD."{self.event_model.pgh_tracked_model.pgh_last_event.field.column}")'
 
         if hasattr(self.event_model, "pgh_obj"):
             fields["pgh_obj_id"] = f'{self.snapshot}."{_get_pgh_obj_pk_col(self.event_model)}"'
@@ -84,9 +92,18 @@ class Event(pgtrigger.Trigger):
 
         cols = ", ".join(f'"{col}"' for col in fields)
         vals = ", ".join(val for val in fields.values())
-        sql = f"""
-            INSERT INTO "{self.event_model._meta.db_table}"
-                ({cols}) VALUES ({vals});
-            RETURN NULL;
-        """
+        try:
+            pgh_obj_id = fields.get("pgh_obj_id", fields.get("fk_field_id"))
+            sql = f"""
+                INSERT INTO "{self.event_model._meta.db_table}"
+                    ({cols}) VALUES ({vals})
+                    RETURNING pgh_id INTO new_event_id;
+
+                UPDATE {self.event_model.pgh_tracked_model._meta.db_table}
+                    SET pgh_last_event_id = new_event_id
+                    WHERE {self.event_model.pgh_tracked_model._meta.pk.column} = {pgh_obj_id};
+                RETURN NULL;
+            """
+        except Exception as e:
+            breakpoint()
         return " ".join(line.strip() for line in sql.split("\n") if line.strip()).strip()

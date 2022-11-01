@@ -663,7 +663,11 @@ def track(
             event model.
     """  # noqa
 
+    exclude = exclude or []
+    exclude.append('pgh_last_event')
+
     def _model_wrapper(model_class):
+
         create_event_model(
             model_class,
             *trackers,
@@ -682,6 +686,16 @@ def track(
             attrs=attrs,
             meta=meta,
         )
+
+        # ver se tem um jeito melhor de pegar esse model name:
+        r = (app_label or model_class._meta.app_label) + "." + (model_name or (model_class._meta.model_name + "Event"))
+        print(r)
+        # model_class._meta.fields
+        if not model_class._meta.proxy and not hasattr(model_class, 'pgh_last_event'):
+            #  if r == 'tests.CustomModelSnapshot':
+            #      breakpoint()
+
+            models.ForeignKey(r, null=True, on_delete=models.SET_NULL).contribute_to_class(model_class, 'pgh_last_event')
 
         return model_class
 

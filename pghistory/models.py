@@ -156,6 +156,7 @@ class Event(models.Model):
 
     pgh_id = models.AutoField(primary_key=True)
     pgh_operation = models.IntegerField(choices=utils.Operation.choices, null=True)
+    pgh_previous = models.ForeignKey('self', on_delete=models.SET_NULL, null=True)
     pgh_created_at = models.DateTimeField(auto_now_add=True)
     pgh_label = models.TextField(help_text="The event label.")
     pgh_trackers = None
