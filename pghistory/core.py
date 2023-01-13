@@ -28,7 +28,7 @@ def _get_name_from_label(label):
         return None
 
 def _get_tracker_type_from_class(tracker_class):
-    return re.sub(r'(?<!^)(?=[A-Z])', '_', type(tracker_class).__name__).lower()
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', tracker_class.__name__).lower()
 
 
 class Tracker:
@@ -39,7 +39,7 @@ class Tracker:
 
     def __init__(self, label=None):
         self.label = label or self.label or self.__class__.__name__.lower()
-        self.type = _get_tracker_type_from_class(self)
+        self.type = _get_tracker_type_from_class(self.__class__)
 
     def setup(self, event_model):
         """Set up the tracker for the event model"""
@@ -744,11 +744,22 @@ def track(
 
 
 class _InsertEventCompiler(compiler.SQLInsertCompiler):
+    def __init__(self, query, connection, using, event_model):
+        self.event_model = event_model
+        super().__init__(query, connection, using)
+
+    def get_sql_param(self, field, param):
+        if field.name != "pgh_context":
+            return param
+        if isinstance(self.event_model._meta.get_field("pgh_context"), utils.JSONField):
+            return AsIs("COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''), NULL)::JSONB")
+        return AsIs("_pgh_attach_context()")
+
     def as_sql(self, *args, **kwargs):
         ret = super().as_sql(*args, **kwargs)
         assert len(ret) == 1
         params = [
-            param if field.name != "pgh_context" else AsIs("_pgh_attach_context()")
+            self.get_sql_param(field, param)
             for field, param in zip(self.query.fields, ret[0][1])
         ]
         return [(ret[0][0], params)]
@@ -775,7 +786,7 @@ def create_event(obj, *, label, tracker_class, using="default"):
     # Verify that the provided label is tracked
     if (obj.__class__, label, tracker_type) not in _registered_trackers:
         raise ValueError(
-            f'"{label}" is not a registered tracker label for model {obj._meta.object_name}.'
+            f'"{label}" of type "{tracker_type}" is not a registered tracker for model {obj._meta.object_name}.'
         )
 
     event_model = _registered_trackers[(obj.__class__, label, tracker_type)]
@@ -803,7 +814,7 @@ def create_event(obj, *, label, tracker_class, using="default"):
         [event_obj],
     )
 
-    vals = _InsertEventCompiler(query, connection, using="default").execute_sql(
+    vals = _InsertEventCompiler(query, connection, using="default", event_model=event_model).execute_sql(
         event_model._meta.fields
     )
 
