@@ -27,14 +27,19 @@ def _get_name_from_label(label):
     else:  # pragma: no cover
         return None
 
+def _get_tracker_type_from_class(tracker_class):
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', tracker_class.__name__).lower()
+
 
 class Tracker:
     """For tracking an event when a condition happens on a model."""
 
     label = None
+    type = None
 
     def __init__(self, label=None):
         self.label = label or self.label or self.__class__.__name__.lower()
+        self.type = _get_tracker_type_from_class(self.__class__)
 
     def setup(self, event_model):
         """Set up the tracker for the event model"""
@@ -44,14 +49,14 @@ class Tracker:
         """Registers the tracker for the event model and calls user-defined setup"""
         tracked_model = event_model.pgh_tracked_model
 
-        if (tracked_model, self.label) in _registered_trackers:
+        if (tracked_model, self.label, self.type) in _registered_trackers:
             raise ValueError(
-                f'Tracker with label "{self.label}" already exists'
+                f'Tracker with label "{self.label}" and type "{self.type}" already exists'
                 f' for model "{tracked_model._meta.label}". Supply a'
                 " different label as the first argument to the tracker."
             )
 
-        _registered_trackers[(tracked_model, self.label)] = event_model
+        _registered_trackers[(tracked_model, self.label, self.type)] = event_model
 
     def pghistory_setup(self, event_model):
         self.register(event_model)
@@ -89,6 +94,7 @@ class DatabaseTracker(Tracker):
         condition=None,
         operation=None,
         snapshot=None,
+        extra_context=None,
     ):
         super().__init__(label=label)
 
@@ -96,17 +102,19 @@ class DatabaseTracker(Tracker):
         self.condition = condition or self.condition
         self.operation = operation or self.operation
         self.snapshot = snapshot or self.snapshot
+        self.extra_context = extra_context or {}
 
     def setup(self, event_model):
         pgtrigger.register(
             trigger.Event(
                 event_model=event_model,
                 label=self.label,
-                name=_get_name_from_label(self.label),
+                name=_get_name_from_label(f"{self.label}_{self.type}"),
                 snapshot=self.snapshot,
                 when=self.when,
                 operation=self.operation,
                 condition=self.condition,
+                extra_context=self.extra_context
             )
         )(event_model.pgh_tracked_model)
 
@@ -253,8 +261,8 @@ class PreconfiguredDatabaseTracker(DatabaseTracker):
     preconfigure the other parameters
     """
 
-    def __init__(self, label=None, *, condition=None):
-        return super().__init__(label=label, condition=condition)
+    def __init__(self, label=None, *, condition=None, extra_context=None):
+        return super().__init__(label=label, condition=condition, extra_context=extra_context)
 
 
 class AfterInsertOrUpdate(PreconfiguredDatabaseTracker):
@@ -736,17 +744,28 @@ def track(
 
 
 class _InsertEventCompiler(compiler.SQLInsertCompiler):
+    def __init__(self, query, connection, using, event_model):
+        self.event_model = event_model
+        super().__init__(query, connection, using)
+
+    def get_sql_param(self, field, param):
+        if field.name != "pgh_context":
+            return param
+        if isinstance(self.event_model._meta.get_field("pgh_context"), utils.JSONField):
+            return AsIs("COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''), NULL)::JSONB")
+        return AsIs("_pgh_attach_context()")
+
     def as_sql(self, *args, **kwargs):
         ret = super().as_sql(*args, **kwargs)
         assert len(ret) == 1
         params = [
-            param if field.name != "pgh_context" else AsIs("_pgh_attach_context()")
+            self.get_sql_param(field, param)
             for field, param in zip(self.query.fields, ret[0][1])
         ]
         return [(ret[0][0], params)]
 
 
-def create_event(obj, *, label, using="default"):
+def create_event(obj, *, label, tracker_class, using="default"):
     """Manually create a event for an object.
 
     Events are automatically linked with any context being tracked
@@ -762,13 +781,15 @@ def create_event(obj, *, label, using="default"):
     Returns:
         models.Model: The created event model.
     """
+    tracker_type = _get_tracker_type_from_class(tracker_class)
+
     # Verify that the provided label is tracked
-    if (obj.__class__, label) not in _registered_trackers:
+    if (obj.__class__, label, tracker_type) not in _registered_trackers:
         raise ValueError(
-            f'"{label}" is not a registered tracker label for model {obj._meta.object_name}.'
+            f'"{label}" of type "{tracker_type}" is not a registered tracker for model {obj._meta.object_name}.'
         )
 
-    event_model = _registered_trackers[(obj.__class__, label)]
+    event_model = _registered_trackers[(obj.__class__, label, tracker_type)]
     event_model_kwargs = {
         "pgh_label": label,
         **{
@@ -793,7 +814,7 @@ def create_event(obj, *, label, using="default"):
         [event_obj],
     )
 
-    vals = _InsertEventCompiler(query, connection, using="default").execute_sql(
+    vals = _InsertEventCompiler(query, connection, using="default", event_model=event_model).execute_sql(
         event_model._meta.fields
     )
 

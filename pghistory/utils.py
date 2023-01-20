@@ -20,7 +20,7 @@ class Operation(IntegerChoices):
     INSERT = 1
     UPDATE = 2
     DELETE = 3
-
+    INSERTORUPDATE = 4
 
 def related_model(field):
     """Return the concrete model a field references"""

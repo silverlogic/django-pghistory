@@ -1,3 +1,4 @@
+import json
 from django.db import models
 import pgtrigger
 
@@ -31,6 +32,7 @@ class Event(pgtrigger.Trigger):
         label=None,
         snapshot=None,
         event_model=None,
+        extra_context=None,
     ):
         self.label = label or self.label
         if not self.label:  # pragma: no cover
@@ -44,6 +46,8 @@ class Event(pgtrigger.Trigger):
         if not self.snapshot:  # pragma: no cover
             raise ValueError('Must provide "snapshot"')
 
+        self.extra_context = extra_context or {}
+
         super().__init__(name=name, operation=operation, condition=condition, when=when)
 
     def get_func(self, model):
@@ -55,7 +59,7 @@ class Event(pgtrigger.Trigger):
             and f.name in tracked_model_fields
             and f.concrete
         }
-        fields["pgh_operation"] = str(getattr(utils.Operation, str(self.operation)).value)
+        fields["pgh_operation"] = str(getattr(utils.Operation, str(self.operation).replace(" ", "")).value)
         fields["pgh_created_at"] = "NOW()"
         fields["pgh_label"] = f"'{self.label}'"
 
@@ -68,7 +72,7 @@ class Event(pgtrigger.Trigger):
             elif isinstance(self.event_model._meta.get_field("pgh_context"), utils.JSONField):
                 fields["pgh_context"] = (
                     "COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''),"
-                    " NULL)::JSONB"
+                    f" NULL)::JSONB || '{json.dumps(self.extra_context)}'::JSONB"
                 )
             else:
                 raise AssertionError

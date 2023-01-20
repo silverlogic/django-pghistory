@@ -1,10 +1,11 @@
 from django.core.handlers.wsgi import WSGIRequest as DjangoWSGIRequest
+from django.core.handlers.asgi import ASGIRequest as DjangoASGIRequest
 
 import pghistory
 from pghistory import config
 
 
-class WSGIRequest(DjangoWSGIRequest):
+class DjangoRequest:
     """
     Although Django's auth middleware sets the user in middleware,
     apps like django-rest-framework set the user in the view layer.
@@ -20,6 +21,12 @@ class WSGIRequest(DjangoWSGIRequest):
             pghistory.context(user=value.pk if value and hasattr(value, "pk") else None)
 
         return super().__setattr__(attr, value)
+
+class WSGIRequest(DjangoRequest, DjangoWSGIRequest):
+    pass
+
+class ASGIRequest(DjangoRequest, DjangoASGIRequest):
+    pass
 
 
 def HistoryMiddleware(get_response):
@@ -37,6 +44,8 @@ def HistoryMiddleware(get_response):
             with pghistory.context(user=user, url=request.path):
                 if isinstance(request, DjangoWSGIRequest):  # pragma: no branch
                     request.__class__ = WSGIRequest
+                elif isinstance(request, DjangoASGIRequest):  # pragma: no branch
+                    request.__class__ = ASGIRequest
 
                 return get_response(request)
         else:
