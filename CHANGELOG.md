@@ -1,4 +1,37 @@
 # Changelog
+## 2.8.0 (2023-06-08)
+### Feature
+  - Added Python 3.11, Django 4.2, and Psycopg 3 support [Wesley Kendall, 647cdad]
+
+    Adds Python 3.11, Django 4.2, and Psycopg 3 support along with tests for multiple Postgres versions.
+    Drops support for Django 2.2.
+
+## 2.7.0 (2023-04-08)
+### Feature
+  - Refactory ``Snapshot`` class and add ``Changed`` condition for better extensibility. [Kevin Ramirez, 0be9242]
+
+    Users can more easily inherit ``pghistory.Snapshot`` and use the ``pghistory.Changed``
+    condition for conditional snapshots.
+  - Add ``BeforeUpdateOrDelete`` tracker [Kevin Ramirez, af01e87]
+
+    Adds a barebones ``BeforeUpdateOrDelete`` tracker for snapshotting OLD rows during an update or delete.
+### Trivial
+  - Fix auto-doc formatting [madtools, de3ddf4]
+
+## 2.6.0 (2023-03-27)
+### Bug
+  - Fix documentation example for tracking events. [Zac Miller, acaaadf]
+  - Fix bug when tracking context data with percent sign. [Adam Johnson, a5380fa]
+
+    All context data is properly escaped, fixing an error that happened when
+    using "%" in any context data. psycopg now escapes all context data,
+    ensuring there is no SQL injection vector in the future.
+### Trivial
+  - Replace usage of ``SET LOCAL`` with ``SELECT set_config`` for better pg stat reporting. [Pierre Ducroquet, ebe2d19]
+  - Fix ``make lint`` command with new .gitignore changes [Kevin Ramirez, ceafe0a]
+  - Fix ``PGHISTORY_OBJ_FIELD`` settings name in the docs. [Johan Van de Wauw, 2bfb23d]
+  - Updated with latest django template, fixing git-tidy deployment issues [Wesley Kendall, 1a6df96]
+
 ## 2.5.1 (2022-10-12)
 ### Trivial
   - Updated with latest Django template [Wesley Kendall, de8a535]

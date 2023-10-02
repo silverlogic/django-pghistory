@@ -16,6 +16,8 @@ from pghistory.core import (
     AfterUpdate,
     BeforeDelete,
     BeforeUpdate,
+    BeforeUpdateOrDelete,
+    Changed,
     create_event,
     create_event_model,
     DatabaseEvent,
@@ -37,6 +39,8 @@ __all__ = [
     "AfterUpdate",
     "BeforeDelete",
     "BeforeUpdate",
+    "BeforeUpdateOrDelete",
+    "Changed",
     "context",
     "ContextForeignKey",
     "ContextJSONField",
@@ -59,7 +63,7 @@ __all__ = [
     "__version__",
 ]
 
-if django.VERSION < (3, 2):
+if django.VERSION < (3, 2):  # pragma: no cover
     default_app_config = "pghistory.apps.PGHistoryConfig"
 
 del django
