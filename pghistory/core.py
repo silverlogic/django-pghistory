@@ -124,7 +124,7 @@ class DatabaseTracker(Tracker):
         self.extra_context = extra_context or {}
 
     def add_event_trigger(
-        self, *, event_model, label, snapshot, when, operation, condition=None, name=None
+        self, *, event_model, label, snapshot, when, operation, condition=None, name=None, extra_context={}
     ):
         pgtrigger.register(
             trigger.Event(
@@ -135,7 +135,7 @@ class DatabaseTracker(Tracker):
                 when=when,
                 operation=operation,
                 condition=condition,
-                extra_context=self.extra_context
+                extra_context=extra_context
             )
         )(event_model.pgh_tracked_model)
 
@@ -147,6 +147,7 @@ class DatabaseTracker(Tracker):
             when=self.when,
             operation=self.operation,
             condition=self.condition,
+            extra_context=self.extra_context
         )
 
 
@@ -228,7 +229,6 @@ class Changed(pgtrigger.Condition):
         return condition.resolve(model)
 
 
-class Snapshot(DatabaseTracker):
 class SnapshotInsert(DatabaseTracker):
     """
     Tracks changes to fields.
@@ -243,7 +243,6 @@ class SnapshotInsert(DatabaseTracker):
         return super().__init__(label=label)
 
     def setup(self, event_model):
-
         self.add_event_trigger(
             event_model=event_model,
             label=self.label,
@@ -263,7 +262,8 @@ class SnapshotUpdate(DatabaseTracker):
 
     label = "snapshot"
 
-    def __init__(self, label=None):
+    def __init__(self, label=None, delayed=False):
+        self.delayed = delayed
         return super().__init__(label=label)
 
     def setup(self, event_model):
@@ -278,7 +278,6 @@ class SnapshotUpdate(DatabaseTracker):
         )
 
 
-
 class SnapshotDelete(DatabaseTracker):
     """
     Tracks changes to fields.
@@ -288,20 +287,19 @@ class SnapshotDelete(DatabaseTracker):
 
     label = "snapshot"
 
-    def __init__(self, label=None):
+    def __init__(self, label=None, delayed=False):
+        self.delayed = delayed
         return super().__init__(label=label)
 
     def setup(self, event_model):
-        delete_trigger = trigger.Event(
+        self.add_event_trigger(
             event_model=event_model,
             label=self.label,
-            name=_get_name_from_label(f"{self.label}_delete"),
+            name=f"{self.label}_delete",
             snapshot="OLD",
             when=pgtrigger.After,
             operation=pgtrigger.Delete,
         )
-
-        pgtrigger.register(delete_trigger)(event_model.pgh_tracked_model)
 
 
 class Snapshot(DatabaseTracker):
@@ -311,7 +309,8 @@ class Snapshot(DatabaseTracker):
     place this in one trigger and do the condition in the plpgsql code.
     """
 
-    def __init__(self, label=None):
+    def __init__(self, label=None, delayed=False):
+        self.delayed = delayed
         return super().__init__(label=label)
 
     def pghistory_setup(self, event_model):
@@ -828,8 +827,8 @@ class _InsertEventCompiler(compiler.SQLInsertCompiler):
         if field.name != "pgh_context":
             return param
         if isinstance(self.event_model._meta.get_field("pgh_context"), utils.JSONField):
-            return AsIs("COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''), NULL)::JSONB")
-        return AsIs("_pgh_attach_context()")
+            return Literal("COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''), NULL)::JSONB")
+        return Literal("_pgh_attach_context()")
 
     def as_sql(self, *args, **kwargs):
         ret = super().as_sql(*args, **kwargs)
@@ -851,6 +850,7 @@ def create_event(obj, *, label, tracker_class, using="default"):
     Args:
         obj (models.Model): An instance of a model.
         label (str): The event label.
+        tracker_class (Type[Tracker]): The tracker class that is tracking the event.
         using (str): The database
 
     Raises:
