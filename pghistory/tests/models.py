@@ -1,6 +1,6 @@
+import pgtrigger
 from django.contrib.auth.models import User
 from django.db import models
-import pgtrigger
 
 import pghistory
 
@@ -216,7 +216,7 @@ class UserGroups(User.groups.through):
 
 
 # Test a custom tracker that snapshots before/after and ignores auto-fields in the condition
-class IgnoreAutoFieldsSnapshot(pghistory.Snapshot):
+class IgnoreAutoFieldsSnapshot(pghistory.DatabaseTracker):
     """
     A custom tracker that snapshots OLD rows on update/delete. Snapshots are only created
     when manual fields are changed (i.e. auto_now fields are ignored in the condition)

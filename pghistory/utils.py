@@ -44,6 +44,7 @@ class Operation(IntegerChoices):
     DELETE = 3
     INSERTORUPDATE = 4
 
+
 def related_model(field):
     """Return the concrete model a field references"""
     if hasattr(field, "related_model") and field.related_model:

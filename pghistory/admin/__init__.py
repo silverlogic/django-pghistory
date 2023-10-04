@@ -1,9 +1,6 @@
 import django
 
-from pghistory.admin.core import (
-    EventModelAdmin,
-    EventsAdmin,
-)
+from pghistory.admin.core import EventModelAdmin, EventsAdmin
 
 __all__ = [
     "EventModelAdmin",

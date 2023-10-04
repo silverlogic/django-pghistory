@@ -4,14 +4,12 @@ import warnings
 import django
 from django.apps import apps
 from django.conf import settings
-from django.db import connections, DEFAULT_DB_ALIAS
-from django.db import models
+from django.db import DEFAULT_DB_ALIAS, connections, models
 from django.db.models.functions import Cast
 from django.db.models.sql import Query
 from django.db.models.sql.compiler import SQLCompiler
 
 from pghistory import core, utils
-
 
 # This class is to preserve backwards compatibility with migrations
 PGHistoryJSONField = utils.JSONField
@@ -209,7 +207,6 @@ class Event(models.Model):
         if (
             not cls._meta.abstract and cls._meta.managed and not cls._meta.proxy
         ):  # pragma: no branch
-
             for tracker in cls.pgh_trackers or []:
                 tracker.pghistory_setup(cls)
 

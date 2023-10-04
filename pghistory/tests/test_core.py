@@ -1,18 +1,18 @@
-from contextlib import ExitStack as no_exception
 import datetime as dt
 import uuid
+from contextlib import ExitStack as no_exception
 
 import ddf
+import pytest
 from django.apps import apps
 from django.db import models
 from django.utils import timezone
-import pytest
 
 import pghistory
-from pghistory import config
-from pghistory import constants
 import pghistory.core
 import pghistory.tests.models as test_models
+from pghistory import config, constants
+from pghistory.core import AfterInsert, Event, ManualTracker
 
 
 def test_generate_history_field(settings):
@@ -179,15 +179,15 @@ def test_create_event():
     """
     m = ddf.G("tests.EventModel")
     with pytest.raises(ValueError, match="not a registered tracker"):
-        pghistory.create_event(m, label="invalid_event")
+        pghistory.create_event(m, label="invalid_event", tracker_class=AfterInsert)
 
-    event = pghistory.create_event(m, label="manual_event")
+    event = pghistory.create_event(m, label="manual_event", tracker_class=ManualTracker)
     assert event.pgh_label == "manual_event"
     assert event.dt_field == m.dt_field
     assert event.int_field == m.int_field
     assert event.pgh_context is None
 
-    event = pghistory.create_event(m, label="no_pgh_obj_manual_event")
+    event = pghistory.create_event(m, label="no_pgh_obj_manual_event", tracker_class=Event)
     assert event.pgh_label == "no_pgh_obj_manual_event"
     assert event.dt_field == m.dt_field
     assert event.int_field == m.int_field
@@ -195,7 +195,7 @@ def test_create_event():
 
     # Context should be added properly
     with pghistory.context(hello="world") as ctx:
-        event = pghistory.create_event(m, label="manual_event")
+        event = pghistory.create_event(m, label="manual_event", tracker_class=ManualTracker)
         assert event.pgh_label == "manual_event"
         assert event.dt_field == m.dt_field
         assert event.int_field == m.int_field

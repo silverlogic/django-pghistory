@@ -4,17 +4,15 @@ import re
 import sys
 import warnings
 
+import pgtrigger
 from django.apps import apps
-from django.db import connections
-from django.db import models
+from django.db import connections, models
 from django.db.models import sql
 from django.db.models.fields.related import RelatedField
 from django.db.models.sql import compiler
 from django.utils.module_loading import import_string
-import pgtrigger
 
 from pghistory import config, constants, trigger, utils
-
 
 if utils.psycopg_maj_version == 2:
     from psycopg2.extensions import AsIs as Literal
@@ -46,8 +44,9 @@ def _fmt_trigger_name(label):
     else:  # pragma: no cover
         return None
 
+
 def _get_tracker_type_from_class(tracker_class):
-    return re.sub(r'(?<!^)(?=[A-Z])', '_', tracker_class.__name__).lower()
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", tracker_class.__name__).lower()
 
 
 class Tracker:
@@ -124,7 +123,16 @@ class DatabaseTracker(Tracker):
         self.extra_context = extra_context or {}
 
     def add_event_trigger(
-        self, *, event_model, label, snapshot, when, operation, condition=None, name=None, extra_context={}
+        self,
+        *,
+        event_model,
+        label,
+        snapshot,
+        when,
+        operation,
+        condition=None,
+        name=None,
+        extra_context={},
     ):
         pgtrigger.register(
             trigger.Event(
@@ -135,7 +143,7 @@ class DatabaseTracker(Tracker):
                 when=when,
                 operation=operation,
                 condition=condition,
-                extra_context=extra_context
+                extra_context=extra_context,
             )
         )(event_model.pgh_tracked_model)
 
@@ -147,7 +155,7 @@ class DatabaseTracker(Tracker):
             when=self.when,
             operation=self.operation,
             condition=self.condition,
-            extra_context=self.extra_context
+            extra_context=self.extra_context,
         )
 
 
@@ -827,15 +835,16 @@ class _InsertEventCompiler(compiler.SQLInsertCompiler):
         if field.name != "pgh_context":
             return param
         if isinstance(self.event_model._meta.get_field("pgh_context"), utils.JSONField):
-            return Literal("COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''), NULL)::JSONB")
+            return Literal(
+                "COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''), NULL)::JSONB"
+            )
         return Literal("_pgh_attach_context()")
 
     def as_sql(self, *args, **kwargs):
         ret = super().as_sql(*args, **kwargs)
         assert len(ret) == 1
         params = [
-            self.get_sql_param(field, param)
-            for field, param in zip(self.query.fields, ret[0][1])
+            self.get_sql_param(field, param) for field, param in zip(self.query.fields, ret[0][1])
         ]
 
         return [(ret[0][0], params)]
@@ -895,9 +904,9 @@ def create_event(obj, *, label, tracker_class, using="default"):
     if utils.psycopg_maj_version == 3:
         connections[using].connection.adapters.register_dumper(Literal, LiteralDumper)
 
-    vals = _InsertEventCompiler(query, connections[using], using=using).execute_sql(
-        event_model._meta.fields
-    )
+    vals = _InsertEventCompiler(
+        query, connections[using], using=using, event_model=event_model
+    ).execute_sql(event_model._meta.fields)
 
     # Django <= 2.2 does not support returning fields from a bulk create,
     # which requires us to fetch fields again to populate the context
@@ -928,7 +937,7 @@ def event_models(
         including_missing_pgh_obj (bool, default=False): Return tracked models even if the pgh_obj
             field is not available.
     """
-    from pghistory.models import Event, BaseAggregateEvent  # noqa
+    from pghistory.models import BaseAggregateEvent, Event  # noqa
 
     models = models or [
         model
