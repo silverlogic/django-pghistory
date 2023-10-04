@@ -1,6 +1,8 @@
 django-pghistory
 ################
 
+This is a fork of https://github.com/Opus10/django-pghistory.
+
 ``django-pghistory`` tracks changes to your Django models
 using `Postgres triggers <https://www.postgresql.org/docs/current/sql-createtrigger.html>`__.
 It offers several advantages over other apps:

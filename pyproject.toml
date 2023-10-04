@@ -25,15 +25,15 @@ show_missing = true
 fail_under = 100
 
 [tool.poetry]
-name = "django-pghistory"
+name = "baseapp-django-pghistory"
 packages = [
   { include = "pghistory" }
 ]
 exclude = [
   "*/tests/"
 ]
-version = "2.8.0"
-description = "History tracking for Django and Postgres"
+version = "2.8.1"
+description = "History tracking for Django and Postgres (updated for Baseapp)"
 authors = ["Wes Kendall"]
 classifiers = [
   "Framework :: Django",
@@ -54,8 +54,8 @@ classifiers = [
 ]
 license = "BSD-3-Clause"
 readme = "README.rst"
-homepage = "https://github.com/Opus10/django-pghistory"
-repository = "https://github.com/Opus10/django-pghistory"
+homepage = "https://github.com/silverlogic/django-pghistory"
+repository = "https://github.com/silverlogic/django-pghistory"
 documentation = "https://django-pghistory.readthedocs.io"
 
 [tool.poetry.dependencies]
