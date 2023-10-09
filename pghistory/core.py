@@ -4,31 +4,49 @@ import re
 import sys
 import warnings
 
+import pgtrigger
 from django.apps import apps
-from django.db import connection
-from django.db import models
+from django.db import connections, models
 from django.db.models import sql
 from django.db.models.fields.related import RelatedField
 from django.db.models.sql import compiler
 from django.utils.module_loading import import_string
-import pgtrigger
-from psycopg2.extensions import AsIs
 
 from pghistory import config, constants, trigger, utils
+
+if utils.psycopg_maj_version == 2:
+    from psycopg2.extensions import AsIs as Literal
+elif utils.psycopg_maj_version == 3:
+    import psycopg.adapt
+
+    class Literal:
+        def __init__(self, val):
+            self.val = val
+
+    class LiteralDumper(psycopg.adapt.Dumper):
+        def dump(self, obj):
+            return obj.val.encode("utf-8")
+
+        def quote(self, obj):
+            return self.dump(obj)
+
+else:
+    raise AssertionError
 
 
 _registered_trackers = {}
 
 
-def _get_name_from_label(label):
+def _fmt_trigger_name(label):
     """Given a history event label, generate a trigger name"""
     if label:
         return re.sub("[^0-9a-zA-Z]+", "_", label)
     else:  # pragma: no cover
         return None
 
+
 def _get_tracker_type_from_class(tracker_class):
-    return re.sub(r'(?<!^)(?=[A-Z])', '_', tracker_class.__name__).lower()
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", tracker_class.__name__).lower()
 
 
 class Tracker:
@@ -104,19 +122,41 @@ class DatabaseTracker(Tracker):
         self.snapshot = snapshot or self.snapshot
         self.extra_context = extra_context or {}
 
-    def setup(self, event_model):
+    def add_event_trigger(
+        self,
+        *,
+        event_model,
+        label,
+        snapshot,
+        when,
+        operation,
+        condition=None,
+        name=None,
+        extra_context={},
+    ):
         pgtrigger.register(
             trigger.Event(
                 event_model=event_model,
-                label=self.label,
-                name=_get_name_from_label(f"{self.label}_{self.type}"),
-                snapshot=self.snapshot,
-                when=self.when,
-                operation=self.operation,
-                condition=self.condition,
-                extra_context=self.extra_context
+                label=label,
+                name=_fmt_trigger_name(name or label),
+                snapshot=snapshot,
+                when=when,
+                operation=operation,
+                condition=condition,
+                extra_context=extra_context,
             )
         )(event_model.pgh_tracked_model)
+
+    def setup(self, event_model):
+        self.add_event_trigger(
+            event_model=event_model,
+            label=self.label,
+            snapshot=self.snapshot,
+            when=self.when,
+            operation=self.operation,
+            condition=self.condition,
+            extra_context=self.extra_context,
+        )
 
 
 class DatabaseEvent(DatabaseTracker):
@@ -148,6 +188,55 @@ class DatabaseEvent(DatabaseTracker):
         )
 
 
+class Changed(pgtrigger.Condition):
+    """A utilty to create conditions based on changes in the tracked model.
+
+    Given the event model, we create a condition as follows:
+
+    - If the event model trackes every field from the main model, we can
+      use a standard ``OLD.* IS DISTINCT FROM NEW.*`` condition to snapshot
+      every change on the main model.
+    - If the event model tracks a subset of the fields of the main model,
+      only changes to event fields will trigger a snapshot. In other words,
+      if the main model has an int and char field, but the event model only
+      tracks the char field, the condition will be
+      ``OLD.char_field IS DISTINCT FROM NEW.char_field``.
+    - If one has fields on the event model and wishes to ignore them from
+      triggering snapshots, pass them to the ``exclude`` argument to this
+      utility.
+    """
+
+    def __init__(self, event_model, exclude=None):
+        self.event_model = event_model
+        self.exclude = exclude or []
+
+    def resolve(self, model):
+        event_fields = [
+            field.name
+            for field in self.event_model._meta.fields
+            if not field.name.startswith("pgh_")
+        ]
+        model_fields = [f.name for f in model._meta.fields]
+
+        # By default, any field in both the main model and event model that
+        # change will trigger the condition. You can exclude fields from
+        # the event model that will trigger snapshots.
+        conditional_fields = [f for f in event_fields if f not in self.exclude]
+
+        if set(event_fields) == set(model_fields) == set(conditional_fields):
+            # We're tracking every field on any change
+            condition = pgtrigger.Condition("OLD.* IS DISTINCT FROM NEW.*")
+        else:
+            # We're either tracking a subset of fields or we have
+            condition = pgtrigger.Q()
+
+            for field in conditional_fields:
+                if hasattr(model, field):
+                    condition |= pgtrigger.Q(**{f"old__{field}__df": pgtrigger.F(f"new__{field}")})
+
+        return condition.resolve(model)
+
+
 class SnapshotInsert(DatabaseTracker):
     """
     Tracks changes to fields.
@@ -157,20 +246,19 @@ class SnapshotInsert(DatabaseTracker):
 
     label = "snapshot"
 
-    def __init__(self, label=None):
+    def __init__(self, label=None, delayed=False):
+        self.delayed = delayed
         return super().__init__(label=label)
 
     def setup(self, event_model):
-        insert_trigger = trigger.Event(
+        self.add_event_trigger(
             event_model=event_model,
             label=self.label,
-            name=_get_name_from_label(f"{self.label}_insert"),
+            name=f"{self.label}_insert",
             snapshot="NEW",
             when=pgtrigger.After,
             operation=pgtrigger.Insert,
         )
-
-        pgtrigger.register(insert_trigger)(event_model.pgh_tracked_model)
 
 
 class SnapshotUpdate(DatabaseTracker):
@@ -182,34 +270,20 @@ class SnapshotUpdate(DatabaseTracker):
 
     label = "snapshot"
 
-    def __init__(self, label=None):
+    def __init__(self, label=None, delayed=False):
+        self.delayed = delayed
         return super().__init__(label=label)
 
     def setup(self, event_model):
-        event_fields = [
-            field.name for field in event_model._meta.fields if not field.name.startswith("pgh_")
-        ]
-        tracked_fields = [field.name for field in event_model.pgh_tracked_model._meta.fields]
-
-        if set(event_fields) == set(tracked_fields):
-            condition = pgtrigger.Condition("OLD.* IS DISTINCT FROM NEW.*")
-        else:
-            condition = pgtrigger.Q()
-            for field in event_fields:
-                if hasattr(event_model.pgh_tracked_model, field):
-                    condition |= pgtrigger.Q(**{f"old__{field}__df": pgtrigger.F(f"new__{field}")})
-
-        update_trigger = trigger.Event(
+        self.add_event_trigger(
             event_model=event_model,
             label=self.label,
-            name=_get_name_from_label(f"{self.label}_update"),
+            name=f"{self.label}_update",
             snapshot="NEW",
             when=pgtrigger.After,
             operation=pgtrigger.Update,
-            condition=condition,
+            condition=Changed(event_model),
         )
-
-        pgtrigger.register(update_trigger)(event_model.pgh_tracked_model)
 
 
 class SnapshotDelete(DatabaseTracker):
@@ -221,20 +295,19 @@ class SnapshotDelete(DatabaseTracker):
 
     label = "snapshot"
 
-    def __init__(self, label=None):
+    def __init__(self, label=None, delayed=False):
+        self.delayed = delayed
         return super().__init__(label=label)
 
     def setup(self, event_model):
-        delete_trigger = trigger.Event(
+        self.add_event_trigger(
             event_model=event_model,
             label=self.label,
-            name=_get_name_from_label(f"{self.label}_delete"),
+            name=f"{self.label}_delete",
             snapshot="OLD",
             when=pgtrigger.After,
             operation=pgtrigger.Delete,
         )
-
-        pgtrigger.register(delete_trigger)(event_model.pgh_tracked_model)
 
 
 class Snapshot(DatabaseTracker):
@@ -244,7 +317,8 @@ class Snapshot(DatabaseTracker):
     place this in one trigger and do the condition in the plpgsql code.
     """
 
-    def __init__(self, label=None):
+    def __init__(self, label=None, delayed=False):
+        self.delayed = delayed
         return super().__init__(label=label)
 
     def pghistory_setup(self, event_model):
@@ -307,6 +381,15 @@ class BeforeDelete(PreconfiguredDatabaseTracker):
     """
 
     operation = pgtrigger.Delete
+    snapshot = "OLD"
+
+
+class BeforeUpdateOrDelete(PreconfiguredDatabaseTracker):
+    """
+    A database tracker that snapshots the old row during an update or delete
+    """
+
+    operation = pgtrigger.Update | pgtrigger.Delete
     snapshot = "OLD"
 
 
@@ -752,16 +835,18 @@ class _InsertEventCompiler(compiler.SQLInsertCompiler):
         if field.name != "pgh_context":
             return param
         if isinstance(self.event_model._meta.get_field("pgh_context"), utils.JSONField):
-            return AsIs("COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''), NULL)::JSONB")
-        return AsIs("_pgh_attach_context()")
+            return Literal(
+                "COALESCE(NULLIF(CURRENT_SETTING('pghistory.context_metadata', TRUE), ''), NULL)::JSONB"
+            )
+        return Literal("_pgh_attach_context()")
 
     def as_sql(self, *args, **kwargs):
         ret = super().as_sql(*args, **kwargs)
         assert len(ret) == 1
         params = [
-            self.get_sql_param(field, param)
-            for field, param in zip(self.query.fields, ret[0][1])
+            self.get_sql_param(field, param) for field, param in zip(self.query.fields, ret[0][1])
         ]
+
         return [(ret[0][0], params)]
 
 
@@ -774,6 +859,8 @@ def create_event(obj, *, label, tracker_class, using="default"):
     Args:
         obj (models.Model): An instance of a model.
         label (str): The event label.
+        tracker_class (Type[Tracker]): The tracker class that is tracking the event.
+        using (str): The database
 
     Raises:
         ValueError: If the event label has not been registered for the model.
@@ -814,9 +901,12 @@ def create_event(obj, *, label, tracker_class, using="default"):
         [event_obj],
     )
 
-    vals = _InsertEventCompiler(query, connection, using="default", event_model=event_model).execute_sql(
-        event_model._meta.fields
-    )
+    if utils.psycopg_maj_version == 3:
+        connections[using].connection.adapters.register_dumper(Literal, LiteralDumper)
+
+    vals = _InsertEventCompiler(
+        query, connections[using], using=using, event_model=event_model
+    ).execute_sql(event_model._meta.fields)
 
     # Django <= 2.2 does not support returning fields from a bulk create,
     # which requires us to fetch fields again to populate the context
@@ -847,7 +937,7 @@ def event_models(
         including_missing_pgh_obj (bool, default=False): Return tracked models even if the pgh_obj
             field is not available.
     """
-    from pghistory.models import Event, BaseAggregateEvent  # noqa
+    from pghistory.models import BaseAggregateEvent, Event  # noqa
 
     models = models or [
         model

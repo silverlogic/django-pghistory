@@ -1,6 +1,8 @@
 django-pghistory
 ################
 
+This is a fork of https://github.com/Opus10/django-pghistory.
+
 ``django-pghistory`` tracks changes to your Django models
 using `Postgres triggers <https://www.postgresql.org/docs/current/sql-createtrigger.html>`__.
 It offers several advantages over other apps:
@@ -71,7 +73,7 @@ for your use case.
 Compatibility
 =============
 
-``django-pghistory`` is compatible with Python 3.7 - 3.10, Django 2.2 - 4.1, and Postgres 10 - 14.
+``django-pghistory`` is compatible with Python 3.7 - 3.11, Django 3.2 - 4.2, Psycopg 2 - 3 and Postgres 12 - 15.
 
 Documentation
 =============

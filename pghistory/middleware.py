@@ -1,5 +1,5 @@
-from django.core.handlers.wsgi import WSGIRequest as DjangoWSGIRequest
 from django.core.handlers.asgi import ASGIRequest as DjangoASGIRequest
+from django.core.handlers.wsgi import WSGIRequest as DjangoWSGIRequest
 
 import pghistory
 from pghistory import config
@@ -22,8 +22,10 @@ class DjangoRequest:
 
         return super().__setattr__(attr, value)
 
+
 class WSGIRequest(DjangoRequest, DjangoWSGIRequest):
     pass
+
 
 class ASGIRequest(DjangoRequest, DjangoASGIRequest):
     pass

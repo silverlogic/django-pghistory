@@ -1,12 +1,12 @@
 import bs4
 import ddf
 import django
-from django import urls
 import pytest
+from django import urls
 
+import pghistory.tests.models as test_models
 from pghistory import models
 from pghistory.admin import core as admin
-import pghistory.tests.models as test_models
 
 
 @pytest.fixture
@@ -77,7 +77,7 @@ def test_events_page(authed_client, settings):
     assert resp.status_code == 200
     html = resp.content.decode("utf-8")
 
-    if django.VERSION < (3, 1):
+    if django.VERSION < (3, 1):  # pragma: no cover
         num_events = models.Events.objects.count()
         assert f"{num_events} events" in html
     else:

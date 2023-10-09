@@ -2,8 +2,8 @@ import datetime as dt
 
 import ddf
 import django
-from django.core.management import call_command
 import pytest
+from django.core.management import call_command
 
 import pghistory
 import pghistory.models
@@ -51,7 +51,7 @@ def test_custom_event_proxy():
     with pghistory.context(url="https://www.google.com", user=user.pk):
         ddf.G(test_models.EventModel)
 
-    if django.VERSION < (3, 2):
+    if django.VERSION < (3, 2):  # pragma: no cover
         with pytest.raises(RuntimeError):
             assert test_models.CustomEventProxy.objects.values("url", "auth_user__username")
     else:

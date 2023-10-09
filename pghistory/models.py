@@ -4,14 +4,12 @@ import warnings
 import django
 from django.apps import apps
 from django.conf import settings
-from django.db import connections, DEFAULT_DB_ALIAS
-from django.db import models
+from django.db import DEFAULT_DB_ALIAS, connections, models
 from django.db.models.functions import Cast
 from django.db.models.sql import Query
 from django.db.models.sql.compiler import SQLCompiler
 
 from pghistory import core, utils
-
 
 # This class is to preserve backwards compatibility with migrations
 PGHistoryJSONField = utils.JSONField
@@ -83,7 +81,9 @@ class EventQueryCompiler(SQLCompiler):
 
         sql, params = qset.query.as_sql(self, self.connection)
         with self.connection.cursor() as cursor:
-            sql = cursor.mogrify(sql, params).decode("utf-8")
+            sql = cursor.mogrify(sql, params)
+            if isinstance(sql, bytes):  # psycopg 2/3 return different types
+                sql = sql.decode("utf-8")
 
         for field in self.proxy_fields:
             sql = sql.replace(f"_{field.column}", field.column)
@@ -103,7 +103,7 @@ class EventQueryCompiler(SQLCompiler):
         sql, params = super().as_sql(*args, **kwargs)
 
         if any(self.proxy_fields):
-            if django.VERSION < (3, 2):
+            if django.VERSION < (3, 2):  # pragma: no cover
                 raise RuntimeError("Must use Django 3.2 or above to proxy fields on event models")
 
             cte = self._get_cte()
@@ -207,7 +207,6 @@ class Event(models.Model):
         if (
             not cls._meta.abstract and cls._meta.managed and not cls._meta.proxy
         ):  # pragma: no branch
-
             for tracker in cls.pgh_trackers or []:
                 tracker.pghistory_setup(cls)
 

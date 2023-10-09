@@ -35,7 +35,7 @@ else ifeq (${OS}, Darwin)
 endif
 
 # Docker run mounts the local code directory, SSH (for git), and global git config information
-DOCKER_RUN_CMD?=$(DOCKER_CMD)-compose run --name $(PACKAGE_NAME) $(DOCKER_RUN_ARGS) -d app
+DOCKER_RUN_CMD?=$(DOCKER_CMD) compose run --name $(PACKAGE_NAME) $(DOCKER_RUN_ARGS) -d app
 
 
 # Print usage of main targets when user types "make" or "make help"
@@ -66,7 +66,7 @@ endif
 # Pull the latest container and start a detached run
 .PHONY: docker-start
 docker-start:
-	$(DOCKER_CMD)-compose pull
+	$(DOCKER_CMD) compose pull
 	$(DOCKER_RUN_CMD)
 
 
@@ -79,7 +79,7 @@ lock:
 # Install dependencies
 .PHONY: dependencies
 dependencies:
-	$(EXEC_WRAPPER) poetry install
+	$(EXEC_WRAPPER) poetry install --no-ansi
 
 
 # Set up git configuration
@@ -120,7 +120,7 @@ docker-setup: docker-teardown docker-start lock dependencies git-setup
 # Spin down docker resources
 .PHONY: docker-teardown
 docker-teardown:
-	$(DOCKER_CMD)-compose down --remove-orphans
+	$(DOCKER_CMD) compose down --remove-orphans
 
 
 # Run a shell

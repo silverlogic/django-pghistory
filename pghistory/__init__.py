@@ -1,35 +1,16 @@
 import django
 
-from pghistory.config import (
-    ContextForeignKey,
-    ContextJSONField,
-    ContextUUIDField,
-    Field,
-    ForeignKey,
-    ObjForeignKey,
-    RelatedField,
-)
+from pghistory.config import (ContextForeignKey, ContextJSONField,
+                              ContextUUIDField, Field, ForeignKey,
+                              ObjForeignKey, RelatedField)
 from pghistory.constants import DEFAULT
-from pghistory.core import (
-    AfterInsert,
-    AfterInsertOrUpdate,
-    AfterUpdate,
-    BeforeDelete,
-    BeforeUpdate,
-    create_event,
-    create_event_model,
-    DatabaseEvent,
-    DatabaseTracker,
-    Event,
-    ManualTracker,
-    ProxyField,
-    Snapshot,
-    track,
-    Tracker,
-)
+from pghistory.core import (AfterInsert, AfterInsertOrUpdate, AfterUpdate,
+                            BeforeDelete, BeforeUpdate, BeforeUpdateOrDelete,
+                            Changed, DatabaseEvent, DatabaseTracker, Event,
+                            ManualTracker, ProxyField, Snapshot, Tracker,
+                            create_event, create_event_model, track)
 from pghistory.runtime import context
 from pghistory.version import __version__
-
 
 __all__ = [
     "AfterInsert",
@@ -37,6 +18,8 @@ __all__ = [
     "AfterUpdate",
     "BeforeDelete",
     "BeforeUpdate",
+    "BeforeUpdateOrDelete",
+    "Changed",
     "context",
     "ContextForeignKey",
     "ContextJSONField",
@@ -59,7 +42,7 @@ __all__ = [
     "__version__",
 ]
 
-if django.VERSION < (3, 2):
+if django.VERSION < (3, 2):  # pragma: no cover
     default_app_config = "pghistory.apps.PGHistoryConfig"
 
 del django

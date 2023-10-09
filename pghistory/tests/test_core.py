@@ -1,17 +1,18 @@
-from contextlib import ExitStack as no_exception
 import datetime as dt
 import uuid
+from contextlib import ExitStack as no_exception
 
 import ddf
+import pytest
 from django.apps import apps
 from django.db import models
-import pytest
+from django.utils import timezone
 
 import pghistory
-from pghistory import config
-from pghistory import constants
 import pghistory.core
 import pghistory.tests.models as test_models
+from pghistory import config, constants
+from pghistory.core import AfterInsert, Event, ManualTracker
 
 
 def test_generate_history_field(settings):
@@ -178,15 +179,15 @@ def test_create_event():
     """
     m = ddf.G("tests.EventModel")
     with pytest.raises(ValueError, match="not a registered tracker"):
-        pghistory.create_event(m, label="invalid_event")
+        pghistory.create_event(m, label="invalid_event", tracker_class=AfterInsert)
 
-    event = pghistory.create_event(m, label="manual_event")
+    event = pghistory.create_event(m, label="manual_event", tracker_class=ManualTracker)
     assert event.pgh_label == "manual_event"
     assert event.dt_field == m.dt_field
     assert event.int_field == m.int_field
     assert event.pgh_context is None
 
-    event = pghistory.create_event(m, label="no_pgh_obj_manual_event")
+    event = pghistory.create_event(m, label="no_pgh_obj_manual_event", tracker_class=Event)
     assert event.pgh_label == "no_pgh_obj_manual_event"
     assert event.dt_field == m.dt_field
     assert event.int_field == m.int_field
@@ -194,7 +195,7 @@ def test_create_event():
 
     # Context should be added properly
     with pghistory.context(hello="world") as ctx:
-        event = pghistory.create_event(m, label="manual_event")
+        event = pghistory.create_event(m, label="manual_event", tracker_class=ManualTracker)
         assert event.pgh_label == "manual_event"
         assert event.dt_field == m.dt_field
         assert event.int_field == m.int_field
@@ -677,3 +678,38 @@ def test_validate_event_model_path(app_label, model_name, abstract, expected_exc
         pghistory.core._validate_event_model_path(
             app_label=app_label, model_name=model_name, abstract=abstract
         )
+
+
+@pytest.mark.django_db
+def test_custom_ignore_auto_fields_tracker():
+    """
+    Verifies that the custom IgnoreAutoFieldsSnapshot tracker, which makes use of
+    pghistory.Changed, works.
+    """
+    m = ddf.G(test_models.IgnoreAutoFieldsSnapshotModel, my_int_field=0, my_char_field="0")
+    snapshot_model = m.no_auto_fields_event.model
+
+    # This tracker does not create events on insert
+    assert not m.no_auto_fields_event.all()
+
+    # Empty updates will not produce an event
+    m.save()
+    assert not m.no_auto_fields_event.all()
+
+    # Updating a non-auto field will produce an event based on the OLD row
+    m.my_int_field = 1
+    m.save()
+    assert [m.my_int_field for m in m.no_auto_fields_event.all()] == [0]
+
+    # Update auto-fields manually. Make sure they don't product an event
+    now = timezone.now()
+    test_models.IgnoreAutoFieldsSnapshotModel.objects.update(created_at=now, updated_at=now)
+    m.refresh_from_db()
+    assert m.created_at == now
+    assert m.updated_at == now
+    assert snapshot_model.objects.count() == 1
+
+    # Deleting the model will create another snapshot
+    m.delete()
+
+    assert snapshot_model.objects.count() == 2
