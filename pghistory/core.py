@@ -16,6 +16,7 @@ from psycopg2.extensions import AsIs
 
 from pghistory import config, constants, trigger, utils
 
+from modeltranslation.fields import TranslationField
 
 _registered_trackers = {}
 
@@ -306,6 +307,12 @@ def _generate_history_field(tracked_model, field):
         return models.IntegerField()
     elif isinstance(field, models.BigAutoField):  # pragma: no cover
         return models.BigIntegerField()
+    elif isinstance(field, TranslationField):
+        return TranslationField(
+            translated_field=field.translated_field,
+            language=field.language,
+            empty_value=field.empty_value
+        )
     elif not field.concrete:  # pragma: no cover
         # Django doesn't have any non-concrete fields that appear
         # in ._meta.fields, but packages like django-prices have
